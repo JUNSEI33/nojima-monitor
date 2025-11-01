@@ -9,7 +9,7 @@ import re
 
 class NojimaPriceMonitor:
     def __init__(self):
-        self.line_token = os.environ.get('LINE_TOKEN', '')
+        self.discord_webhook = os.environ.get('DISCORD_WEBHOOK', '')
         urls_str = os.environ.get('MONITOR_URLS', '')
         self.urls = [url.strip() for url in urls_str.split(',') if url.strip()]
         self.check_interval = int(os.environ.get('CHECK_INTERVAL', '300'))
@@ -90,23 +90,33 @@ class NojimaPriceMonitor:
             print(f"❌ エラー: {str(e)[:100]}")
             return None
     
-    def send_line_notify(self, message):
-        if not self.line_token:
-            print("⚠️  LINE_TOKEN未設定")
+    def send_discord_notification(self, message, is_price_drop=False):
+        if not self.discord_webhook:
+            print("⚠️  DISCORD_WEBHOOK未設定")
             return False
-        api = 'https://notify-api.line.me/api/notify'
-        headers = {'Authorization': f'Bearer {self.line_token}'}
-        data = {'message': f'\n{message}'}
+        
+        # Discord Embed形式で通知
+        color = 0x00ff00 if is_price_drop else 0xff9900  # 緑=値下げ、オレンジ=値上げ
+        
+        embed = {
+            "embeds": [{
+                "title": "🎉 値下げ検知！" if is_price_drop else "📈 価格変更",
+                "description": message,
+                "color": color,
+                "timestamp": datetime.utcnow().isoformat()
+            }]
+        }
+        
         try:
-            response = requests.post(api, headers=headers, data=data)
-            if response.status_code == 200:
-                print("✅ LINE通知送信成功")
+            response = requests.post(self.discord_webhook, json=embed)
+            if response.status_code == 204:
+                print("✅ Discord通知送信成功")
                 return True
             else:
-                print(f"⚠️  LINE通知失敗: {response.status_code}")
+                print(f"⚠️  Discord通知失敗: {response.status_code}")
                 return False
         except Exception as e:
-            print(f"❌ LINE通知エラー: {e}")
+            print(f"❌ Discord通知エラー: {e}")
             return False
     
     def notify(self, message, is_price_drop=False):
@@ -115,21 +125,22 @@ class NojimaPriceMonitor:
         print("="*60)
         print(message)
         print("="*60 + "\n")
-        emoji = "🎉📉" if is_price_drop else "📈"
-        line_message = f"{emoji} 価格変更検知!\n\n{message}"
-        self.send_line_notify(line_message)
+        self.send_discord_notification(message, is_price_drop)
     
     def monitor(self):
         if not self.urls:
             print("❌ MONITOR_URLS未設定")
             return
         print(f"🚀 価格監視開始")
-        print(f"📱 LINE: {'有効' if self.line_token else '未設定'}")
+        print(f"💬 Discord: {'有効' if self.discord_webhook else '未設定'}")
         print(f"⏰ 間隔: {self.check_interval}秒")
         print(f"📋 監視: {len(self.urls)}個")
         print(f"{'='*60}\n")
-        if self.line_token:
-            self.send_line_notify(f"🚀 価格監視開始\n監視: {len(self.urls)}個\n間隔: {self.check_interval}秒")
+        if self.discord_webhook:
+            self.send_discord_notification(
+                f"🚀 **価格監視開始**\n\n監視商品数: {len(self.urls)}個\nチェック間隔: {self.check_interval}秒",
+                False
+            )
         cycle = 0
         while True:
             cycle += 1
@@ -147,8 +158,8 @@ class NojimaPriceMonitor:
                         change = current_price - previous_price
                         change_percent = (change / previous_price) * 100
                         is_price_drop = change < 0
-                        emoji = "📉 値下げ!" if is_price_drop else "📈 値上げ"
-                        message = f"{emoji}\n商品: {product_name}\n前回: ¥{previous_price:,}\n現在: ¥{current_price:,}\n変動: ¥{change:,} ({change_percent:+.1f}%)\n\n購入↓\n{url}"
+                        emoji = "📉 **値下げ!**" if is_price_drop else "📈 **値上げ**"
+                        message = f"{emoji}\n\n**商品:** {product_name}\n**前回:** ¥{previous_price:,}\n**現在:** ¥{current_price:,}\n**変動:** ¥{change:,} ({change_percent:+.1f}%)\n\n[🛒 購入ページへ]({url})"
                         self.notify(message, is_price_drop)
                         self.previous_prices[url] = current_data
                         self.save_prices()
@@ -164,7 +175,7 @@ class NojimaPriceMonitor:
 
 if __name__ == "__main__":
     print("="*60)
-    print("  ノジマオンライン 価格監視 (Render)")
+    print("  ノジマオンライン 価格監視 (Discord)")
     print("="*60 + "\n")
     monitor = NojimaPriceMonitor()
     try:
